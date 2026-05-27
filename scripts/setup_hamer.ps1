@@ -13,14 +13,33 @@ $HamerPython = Join-Path $HamerDir ".hamer\Scripts\python.exe"
 
 Write-Host "== Setup HaMeR .hamer =="
 
+function Test-HamerSource {
+    param([string]$Path)
+    return (
+        (Test-Path (Join-Path $Path "hamer")) -and
+        (Test-Path (Join-Path $Path "demo.py")) -and
+        (Test-Path (Join-Path $Path "setup.py"))
+    )
+}
+
 if (!(Test-Path $HamerDir)) {
     Write-Host "Cloning HaMeR into external\hamer..."
     New-Item -ItemType Directory -Force -Path ".\external" | Out-Null
     git clone --recursive https://github.com/geopavlakos/hamer.git .\external\hamer
 }
+elseif (!(Test-HamerSource $HamerDir)) {
+    $existingItems = @(Get-ChildItem -Force -LiteralPath $HamerDir -ErrorAction SilentlyContinue)
+    if ($existingItems.Count -eq 0) {
+        Write-Host "external\hamer exists but is empty; cloning HaMeR into it..."
+        git clone --recursive https://github.com/geopavlakos/hamer.git .\external\hamer
+    }
+    else {
+        throw "external\hamer exists but does not look like a HaMeR clone. Move or remove it after backing up any checkpoints, then rerun this script."
+    }
+}
 
-if (!(Test-Path (Join-Path $HamerDir "hamer"))) {
-    throw "external\hamer exists, but HaMeR source folder external\hamer\hamer was not found."
+if (!(Test-HamerSource $HamerDir)) {
+    throw "HaMeR source was not found under external\hamer. Expected external\hamer\hamer, demo.py, and setup.py."
 }
 
 if (!(Test-Path $HamerPython)) {

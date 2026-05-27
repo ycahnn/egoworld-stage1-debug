@@ -10,6 +10,9 @@ venv/
 env/
 external/hamer/.hamer/
 
+# External repositories cloned by setup scripts
+external/hamer/
+
 # Large model/data files
 *.ckpt
 *.pth

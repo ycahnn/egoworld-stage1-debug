@@ -6,10 +6,12 @@ Run from the main .venv environment with:
     python scripts/check_project_state.py
 
 This script checks file existence, main environment imports, and HaMeR environment imports.
+It is read-only by default; pass --write-report to save outputs/environment_report.md.
 """
 
 from __future__ import annotations
 
+import argparse
 import json
 import subprocess
 import sys
@@ -31,6 +33,9 @@ REQUIRED_FILES = [
     PROJECT_ROOT / "outputs" / "hand_bbox_debug.png",
     PROJECT_ROOT / "outputs" / "hand_crops",
     PROJECT_ROOT / "external" / "hamer",
+    PROJECT_ROOT / "external" / "hamer" / "hamer",
+    PROJECT_ROOT / "external" / "hamer" / "demo.py",
+    PROJECT_ROOT / "external" / "hamer" / "setup.py",
     PROJECT_ROOT / "external" / "hamer" / ".hamer" / "Scripts" / "python.exe",
     PROJECT_ROOT / "external" / "hamer" / "_DATA" / "data" / "mano" / "MANO_RIGHT.pkl",
     PROJECT_ROOT / "external" / "hamer" / "_DATA" / "data" / "mano" / "MANO_LEFT.pkl",
@@ -41,12 +46,14 @@ REQUIRED_FILES = [
 
 def run_subprocess_imports(python_executable: Path, package_names: List[str]) -> Dict[str, bool]:
     results: Dict[str, bool] = {}
+    if not python_executable.exists():
+        return {package_name: False for package_name in package_names}
     for package_name in package_names:
         command = [str(python_executable), "-c", f"import {package_name}"]
         try:
             subprocess.run(command, check=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
             results[package_name] = True
-        except subprocess.CalledProcessError:
+        except (subprocess.CalledProcessError, FileNotFoundError):
             results[package_name] = False
     return results
 
@@ -97,7 +104,18 @@ def env_report(main_python: Path, hamer_python: Path, results: Dict[str, object]
     return "\n".join(lines)
 
 
+def parse_args() -> argparse.Namespace:
+    parser = argparse.ArgumentParser(description="Check EgoWorld Stage 1 workspace state.")
+    parser.add_argument(
+        "--write-report",
+        action="store_true",
+        help="Write outputs/environment_report.md. By default this script only prints diagnostics.",
+    )
+    return parser.parse_args()
+
+
 def main() -> None:
+    args = parse_args()
     print("Checking project state for EgoWorld Stage 1...")
     print(f"Project root: {PROJECT_ROOT}")
     print(f"Main Python executable: {sys.executable}")
@@ -134,12 +152,15 @@ def main() -> None:
         "optional_hamer_imports": optional_hamer_import_results,
     }
     markdowntxt = env_report(main_python, hamer_python, report_data)
-    try:
-        OUTPUT_MARKDOWN.parent.mkdir(parents=True, exist_ok=True)
-        OUTPUT_MARKDOWN.write_text(markdowntxt, encoding="utf-8")
-        print(f"\nEnvironment report written to: {OUTPUT_MARKDOWN}")
-    except Exception as exc:
-        print(f"Failed to write markdown report: {exc}")
+    if args.write_report:
+        try:
+            OUTPUT_MARKDOWN.parent.mkdir(parents=True, exist_ok=True)
+            OUTPUT_MARKDOWN.write_text(markdowntxt, encoding="utf-8")
+            print(f"\nEnvironment report written to: {OUTPUT_MARKDOWN}")
+        except Exception as exc:
+            print(f"Failed to write markdown report: {exc}")
+    else:
+        print("\nRead-only check complete. Pass --write-report to save outputs/environment_report.md.")
 
 
 if __name__ == "__main__":
