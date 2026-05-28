@@ -20,12 +20,13 @@ Pipeline:
 4. Crop hands from detected boxes.
 5. Run HaMeR/MANO inference from MediaPipe boxes.
 6. Verify HaMeR projection on the original image.
+7. Validate the generated Stage 1 outputs.
 
 ## Constraints
 
-- Do not install `detectron2`.
+- Do not install `detectron2` for this Stage 1 path.
 - Do not use the HaMeR renderer.
-- Do not use `pyrender`, `PyOpenGL`, or OpenGL for Stage 1 inference.
+- Do not use `pyrender`, `PyOpenGL`, OpenGL, EGL, offscreen rendering, or GUI rendering for Stage 1 inference.
 - Do not run `pip install -e .[all]` inside HaMeR.
 - Treat HaMeR as a pure-inference backend cloned under `external/hamer`.
 - Do not commit inputs, outputs, checkpoints, MANO files, conda envs, or caches.
@@ -39,7 +40,7 @@ egoworld-main   # Python 3.11, depth / point cloud / MediaPipe / verification
 egoworld-hamer  # Python 3.10, HaMeR inference only
 ```
 
-GPU is not assumed. The commands below use CPU wheels by default. CPU is enough for setup checks and lightweight smoke tests, but MoGe and HaMeR inference can be slow on CPU.
+GPU is assumed. The commands below install CUDA-enabled PyTorch wheels for both environments. Make sure the machine has an NVIDIA driver compatible with the CUDA wheels before running MoGe or HaMeR inference. If CUDA is unavailable, the preflight script will report it; HaMeR may run on CPU but can be slow.
 
 ## 1. Clone
 
@@ -84,7 +85,7 @@ Adjust the path if your conda installation is elsewhere.
 conda activate egoworld-main
 python -m pip install --upgrade pip setuptools wheel
 python -m pip install -r requirements.txt --index-url https://pypi.org/simple
-python -m pip install -r requirements-torch-cpu.txt
+python -m pip install -r requirements-torch-cu126.txt
 python -m pip check
 ```
 
@@ -99,7 +100,7 @@ python -c "import cv2, mediapipe, numpy, torch; print('main deps ok', torch.__ve
 ```bash
 conda activate egoworld-hamer
 python -m pip install --upgrade pip setuptools wheel
-python -m pip install -r requirements-hamer-torch-cpu.txt
+python -m pip install -r requirements-hamer-torch-cu118.txt
 python -m pip install chumpy==0.70 --no-build-isolation --index-url https://pypi.org/simple
 python -m pip install -r requirements-hamer.txt --index-url https://pypi.org/simple
 python -m pip check
@@ -110,16 +111,14 @@ Verify:
 ```bash
 python -c "import torch; print('hamer torch', torch.__version__, torch.cuda.is_available())"
 python -c "import smplx, timm, cv2, numpy, scipy; print('hamer deps ok')"
-cd external/hamer
-python -c "import hamer; print('hamer import ok')"
-cd ../..
+python scripts/check_stage1_env.py
 ```
+
+`check_stage1_env.py` verifies that local `external/hamer` wins over any installed `hamer` package and that renderer import compatibility is safe without `pyrender`, OpenGL, EGL, or `detectron2`.
 
 ## 5. Add Model Assets
 
-Place HaMeR assets under `external/hamer/_DATA`.
-
-The wrapper checks for:
+Place HaMeR assets under `external/hamer/_DATA`:
 
 ```text
 external/hamer/_DATA/hamer_ckpts/checkpoints/hamer.ckpt
@@ -128,7 +127,9 @@ external/hamer/_DATA/data/mano/MANO_LEFT.pkl
 external/hamer/_DATA/data/mano_mean_params.npz
 ```
 
-These files are not included in Git.
+`MANO_RIGHT.pkl` and `MANO_LEFT.pkl` cannot be auto-downloaded because of MANO license restrictions. Download them manually from MANO and place them exactly at the paths above.
+
+Get `hamer.ckpt` and `mano_mean_params.npz` from the official HaMeR release assets or demo data, then place them at the paths above. These files are not included in Git.
 
 ## 6. Add Input
 
@@ -142,7 +143,23 @@ Place your image here:
 inputs/exo.jpg
 ```
 
-## 7. Smoke Test Without Heavy Models
+## 7. Preflight Checks
+
+Workspace and main-env check:
+
+```bash
+conda activate egoworld-main
+python scripts/check_project_state.py
+```
+
+HaMeR env check:
+
+```bash
+conda activate egoworld-hamer
+python scripts/check_stage1_env.py
+```
+
+## 8. Smoke Test Without Heavy Models
 
 This checks repo paths and the main pipeline without MoGe or HaMeR inference:
 
@@ -151,16 +168,12 @@ conda activate egoworld-main
 python infer_depth_pointcloud.py --image inputs/exo.jpg --out outputs --depth_model dummy
 python infer_hand_bbox.py --image inputs/exo.jpg --out outputs
 python crop_hands_from_bboxes.py --image inputs/exo.jpg --bbox_json outputs/hand_bboxes.json --out outputs/hand_crops
-python scripts/check_project_state.py
+python scripts/verify_stage1_outputs.py --allow-no-hands
 ```
 
-`check_project_state.py` is read-only by default. To write `outputs/environment_report.md`:
+The smoke test may warn that HaMeR outputs are missing if no hands are detected or if HaMeR inference has not been run yet.
 
-```bash
-python scripts/check_project_state.py --write-report
-```
-
-## 8. Run Stage 1
+## 9. Run Stage 1
 
 Depth and point cloud:
 
@@ -168,6 +181,8 @@ Depth and point cloud:
 conda activate egoworld-main
 python infer_depth_pointcloud.py --image inputs/exo.jpg --out outputs --depth_model moge
 ```
+
+If MoGe import, model download, CUDA, or inference fails, the script fails clearly instead of silently writing dummy depth for a requested MoGe run.
 
 Hand detection and crops:
 
@@ -184,11 +199,20 @@ conda activate egoworld-hamer
 python infer_hamer_from_bboxes.py --image inputs/exo.jpg --bbox_json outputs/hand_bboxes.json --out outputs/hamer
 ```
 
+If no hands are detected, HaMeR inference exits clearly and does not create fake successful outputs. If required model/MANO files are missing, the command prints the exact missing paths.
+
 Projection verification:
 
 ```bash
 conda activate egoworld-main
 python scripts/verify_hamer_projection.py --image inputs/exo.jpg --hamer_dir outputs/hamer --bbox_json outputs/hand_bboxes.json --out outputs/hamer_projection
+```
+
+Output verification:
+
+```bash
+conda activate egoworld-main
+python scripts/verify_stage1_outputs.py
 ```
 
 Optional diagnostics:
@@ -216,6 +240,7 @@ outputs/hamer/hamer_metadata.json
 outputs/hamer/*_vertices.npy
 outputs/hamer/*_joints.npy
 outputs/hamer/*_faces.npy
+outputs/hamer/*_mesh.obj
 outputs/hamer_projection/final_projection_report.md
 outputs/hamer_projection/final_projection_debug.png
 ```

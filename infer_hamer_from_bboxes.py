@@ -6,65 +6,39 @@ MediaPipe-generated JSON. It saves vertices, joints, faces and an OBJ
 mesh per detected hand.
 
 Usage (example):
-.\\external\hamer\\.hamer\Scripts\python.exe infer_hamer_from_bboxes.py \
+conda activate egoworld-hamer
+python infer_hamer_from_bboxes.py \
     --image inputs/exo.jpg \
     --bbox_json outputs/hand_bboxes.json \
     --out outputs/hamer
 
-Important Windows setup: set PYOPENGL_PLATFORM early to avoid OpenGL
-backends being selected before we have a chance to configure them.
+Stage 1 uses HaMeR as a pure inference backend. Renderer/OpenGL paths
+are intentionally disabled.
 """
-import os
-if os.name == "nt":
-    # Ensure the OpenGL platform is explicitly set on Windows before any
-    # HaMeR/OpenGL-related imports occur.
-    os.environ.pop("PYOPENGL_PLATFORM", None)
-    os.environ["PYOPENGL_PLATFORM"] = "win32"
-
 from pathlib import Path
+import os
 import sys
 import json
 import math
 import argparse
 from typing import List, Dict, Any
-import types
 
 import cv2
 import numpy as np
 import torch
 
+from src.hamer_stage1_compat import cam_crop_to_full, install_hamer_renderer_stub
+
 
 PROJECT_ROOT = Path(__file__).resolve().parent
 HAMER_ROOT = PROJECT_ROOT / "external" / "hamer"
 
-# Make local HaMeR importable
-sys.path.insert(0, str(HAMER_ROOT))
-
-
-def install_dummy_hamer_renderer() -> None:
-    module_name = "hamer.utils.renderer"
-    if module_name in sys.modules:
-        return
-
-    dummy = types.ModuleType(module_name)
-
-    class DummyRenderer:
-        def __init__(self, *args, **kwargs):
-            pass
-
-        def __call__(self, *args, **kwargs):
-            return None
-
-        def visualize_all_tb(self, *args, **kwargs):
-            return None
-
-        def render_rgba(self, *args, **kwargs):
-            return None
-
-    dummy.SkeletonRenderer = DummyRenderer
-    dummy.MeshRenderer = DummyRenderer
-    sys.modules[module_name] = dummy
-
+# Make the local external HaMeR clone win over any installed hamer package.
+hamer_root_str = str(HAMER_ROOT)
+if hamer_root_str in sys.path:
+    sys.path.remove(hamer_root_str)
+sys.path.insert(0, hamer_root_str)
+install_hamer_renderer_stub()
 
 def save_obj(vertices: np.ndarray, faces: np.ndarray, path: Path) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
@@ -173,17 +147,6 @@ def to_jsonable(value: Any) -> Any:
     return str(value)
 
 
-def cam_crop_to_full(cam_bbox: torch.Tensor, box_center: torch.Tensor, box_size: torch.Tensor, img_size: torch.Tensor, focal_length: float) -> torch.Tensor:
-    img_w, img_h = img_size[:, 0], img_size[:, 1]
-    cx, cy, b = box_center[:, 0], box_center[:, 1], box_size
-    w_2, h_2 = img_w / 2.0, img_h / 2.0
-    bs = b * cam_bbox[:, 0] + 1e-9
-    tz = 2 * focal_length / bs
-    tx = (2 * (cx - w_2) / bs) + cam_bbox[:, 1]
-    ty = (2 * (cy - h_2) / bs) + cam_bbox[:, 2]
-    full_cam = torch.stack([tx, ty, tz], dim=-1)
-    return full_cam
-
 
 def _summarize_output_dict(out: Dict[str, Any], debug_dir: Path, prefix: str) -> Dict[str, Any]:
     summary: Dict[str, Any] = {}
@@ -252,9 +215,32 @@ def check_required_files() -> bool:
         print("Missing required HaMeR data files:")
         for m in missing:
             print(" - ", m)
-        print("Please download or place these files under external/hamer/_DATA as described in the HaMeR repository.")
+        print("MANO_RIGHT.pkl and MANO_LEFT.pkl must be downloaded manually from MANO and placed at the paths above; they cannot be auto-downloaded because of the MANO license.")
         return False
     return True
+
+
+def _require_finite_array(name: str, array: np.ndarray, ndim: int | None = None) -> None:
+    if not isinstance(array, np.ndarray):
+        raise TypeError(f"{name} is not a numpy array")
+    if array.size == 0:
+        raise ValueError(f"{name} is empty")
+    if ndim is not None and array.ndim != ndim:
+        raise ValueError(f"{name} has shape {array.shape}; expected {ndim} dimensions")
+    if not np.issubdtype(array.dtype, np.number):
+        raise TypeError(f"{name} must be numeric, got {array.dtype}")
+    if not np.all(np.isfinite(array)):
+        raise ValueError(f"{name} contains NaN or inf values")
+
+
+def _validate_bbox(x1: int, y1: int, x2: int, y2: int, image_width: int, image_height: int, index: int) -> None:
+    if x2 <= x1 or y2 <= y1:
+        raise ValueError(f"Hand bbox {index} is invalid: {[x1, y1, x2, y2]}")
+    if x1 < 0 or y1 < 0 or x2 >= image_width or y2 >= image_height:
+        raise ValueError(
+            f"Hand bbox {index} is outside image bounds {image_width}x{image_height}: "
+            f"{[x1, y1, x2, y2]}"
+        )
 
 
 def main() -> None:
@@ -267,14 +253,12 @@ def main() -> None:
     bbox_json_path = (PROJECT_ROOT / args.bbox_json).resolve() if not Path(args.bbox_json).is_absolute() else Path(args.bbox_json)
 
     if not image_path.exists():
-        print(f"Input image not found: {image_path}")
-        return
+        raise FileNotFoundError(f"Input image not found: {image_path}")
     if not bbox_json_path.exists():
-        print(f"BBox JSON not found: {bbox_json_path}")
-        return
+        raise FileNotFoundError(f"BBox JSON not found: {bbox_json_path}")
 
     if not check_required_files():
-        return
+        raise SystemExit(1)
 
     ckpt = HAMER_ROOT / "_DATA" / "hamer_ckpts" / "checkpoints" / "hamer.ckpt"
     mano_mean = HAMER_ROOT / "_DATA" / "data" / "mano_mean_params.npz"
@@ -290,16 +274,14 @@ def main() -> None:
         os.chdir(HAMER_ROOT)
         print(f"Changed working directory to HAMER_ROOT: {Path.cwd()}")
 
-        install_dummy_hamer_renderer()
+        install_hamer_renderer_stub()
 
         # Import HaMeR loader after switching to HAMER_ROOT so relative paths in
         # the HaMeR config resolve correctly.
         try:
             from hamer.models import load_hamer
         except Exception as exc:
-            print("Failed to import HaMeR. Make sure external/hamer is on sys.path and dependencies are installed.")
-            print(str(exc))
-            return
+            raise RuntimeError("Failed to import HaMeR from external/hamer. Check sys.path and hamer env dependencies.") from exc
 
         model, model_cfg = load_hamer(str(ckpt))
     finally:
@@ -319,14 +301,12 @@ def main() -> None:
 
     hands = bbox_data.get("hands", [])
     if len(hands) == 0:
-        print("No hands found in bbox JSON.")
-        return
+        raise SystemExit("No hands found in bbox JSON; HaMeR inference was not run.")
 
     # Read image once
     img_cv2 = cv2.imread(str(image_path))
     if img_cv2 is None:
-        print(f"Failed to read image: {image_path}")
-        return
+        raise FileNotFoundError(f"Failed to read image: {image_path}")
 
     # Build boxes and handedness arrays
     boxes = []
@@ -339,7 +319,8 @@ def main() -> None:
         y2 = int(h.get("y2", 0))
         side = h.get("hand_side_for_hamer", None)
         raw = h.get("raw_handedness", None)
-        conf = float(h.get("confidence", 0.0))
+        conf = float(h.get("confidence", 0.0) or 0.0)
+        _validate_bbox(x1, y1, x2, y2, img_cv2.shape[1], img_cv2.shape[0], len(entries))
         boxes.append([x1, y1, x2, y2])
         # HaMeR expects right==1, left==0
         rights.append(1 if (side and side.lower() == "right") else 0)
@@ -353,8 +334,7 @@ def main() -> None:
         from hamer.datasets.vitdet_dataset import ViTDetDataset
         from hamer.utils import recursive_to
     except Exception as exc:
-        print("Failed to import HaMeR dataset utilities: ", str(exc))
-        return
+        raise RuntimeError("Failed to import HaMeR dataset utilities from external/hamer") from exc
 
     dataset = ViTDetDataset(model_cfg, img_cv2, boxes_np, rights_np, rescale_factor=args.rescale)
     dataloader = torch.utils.data.DataLoader(dataset, batch_size=1, shuffle=False, num_workers=0)
@@ -421,10 +401,25 @@ def main() -> None:
         }
         hand_summary["preprocessing"] = preprocessing
 
-        # Extract arrays (first / only element in batch)
+        # Extract arrays (first / only element in batch) and verify that real outputs exist.
+        for required_key in ("pred_vertices", "pred_keypoints_3d"):
+            if required_key not in out:
+                raise KeyError(f"HaMeR output missing required key: {required_key}")
+        if not hasattr(model, "mano") or not hasattr(model.mano, "faces"):
+            raise AttributeError("Loaded HaMeR model does not expose model.mano.faces")
+
         verts = out["pred_vertices"][0].detach().cpu().numpy()
         joints = out["pred_keypoints_3d"][0].detach().cpu().numpy()
-        faces = model.mano.faces.copy()
+        faces = np.asarray(model.mano.faces).copy()
+        _require_finite_array("pred_vertices", verts, ndim=2)
+        _require_finite_array("pred_keypoints_3d", joints, ndim=2)
+        _require_finite_array("mano.faces", faces, ndim=2)
+        if verts.shape[1] != 3:
+            raise ValueError(f"pred_vertices has shape {verts.shape}; expected Nx3")
+        if joints.shape[1] != 3:
+            raise ValueError(f"pred_keypoints_3d has shape {joints.shape}; expected Nx3")
+        if faces.shape[1] != 3:
+            raise ValueError(f"mano.faces has shape {faces.shape}; expected Fx3")
 
         side = entries[idx].get("hand_side_for_hamer") or "unknown"
         safe_side = (side.lower() if isinstance(side, str) else "unknown")

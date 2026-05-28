@@ -1,4 +1,3 @@
-import importlib
 import numpy as np
 from PIL import Image
 
@@ -25,19 +24,13 @@ class DepthEstimator:
             self.torch = torch
             self.device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
         except Exception as exc:
-            print("Error importing torch for MoGe mode:", exc)
-            print("Falling back to dummy depth estimator.")
-            self._set_dummy_mode()
-            return
+            raise RuntimeError("Failed to import torch for MoGe mode") from exc
 
         try:
             # Use the official, exact MoGe import path as requested
             from moge.model.v2 import MoGeModel
         except Exception as exc:
-            print("Error importing MoGeModel from moge.model.v2:", exc)
-            print("Falling back to dummy depth estimator.")
-            self._set_dummy_mode()
-            return
+            raise RuntimeError("Failed to import MoGeModel from moge.model.v2") from exc
 
         try:
             # Load the specified pretrained checkpoint
@@ -49,9 +42,7 @@ class DepthEstimator:
 
             self.moge_available = True
         except Exception as exc:
-            print("Error initializing MoGeModel.from_pretrained:", exc)
-            print("Falling back to dummy depth estimator.")
-            self._set_dummy_mode()
+            raise RuntimeError("Failed to initialize MoGeModel.from_pretrained") from exc
 
     def _set_dummy_mode(self) -> None:
         self.mode = "dummy"
@@ -75,8 +66,7 @@ class DepthEstimator:
             try:
                 return self._predict_moge(image_path)
             except Exception as exc:
-                print("Warning: MoGe prediction failed:", exc)
-                print("Falling back to dummy depth estimator.")
+                raise RuntimeError("MoGe prediction failed") from exc
 
         return self._predict_dummy(image_path)
 

@@ -58,7 +58,7 @@ class HandCropper:
         y2_clamped = max(0, min(self.height - 1, y2))
 
         if x2_clamped <= x1_clamped or y2_clamped <= y1_clamped:
-            return np.zeros((1, 1, 3), dtype=np.uint8)
+            raise ValueError(f"Invalid hand crop bbox: {[x1, y1, x2, y2]}")
 
         return self.image[y1_clamped : y2_clamped + 1, x1_clamped : x2_clamped + 1]
 

@@ -46,6 +46,9 @@ def backproject_rgbd_to_pointcloud(rgb: np.ndarray, depth: np.ndarray, K: np.nda
     points_xyz = points_xyz[valid_flat]
     colors_rgb = colors_rgb[valid_flat]
     
+    if points_xyz.shape[0] == 0:
+        raise ValueError("Point cloud has zero valid points; depth must contain positive finite values.")
+
     print(f"Saved {points_xyz.shape[0]} points to point cloud")
     return points_xyz, colors_rgb
 
@@ -56,6 +59,8 @@ def save_pointcloud_ply(points_xyz: np.ndarray, colors_rgb: np.ndarray, output_p
         raise ValueError("Number of points and colors must match.")
 
     num_points = points_xyz.shape[0]
+    if num_points == 0:
+        raise ValueError("Refusing to write an empty point cloud PLY.")
     header = [
         "ply",
         "format ascii 1.0",
