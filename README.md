@@ -222,7 +222,18 @@ conda activate egoworld-main
 python scripts/render_hand_depth.py --image inputs/exo.jpg --hamer_dir outputs/hamer --bbox_json outputs/hand_bboxes.json --out outputs/hamer_depth
 python scripts/scale_depth_with_hand.py --image inputs/exo.jpg --depth outputs/depth_raw.npy --hand_depth outputs/hamer_depth/hand_depth.npy --hand_mask outputs/hamer_depth/hand_mask.png --out outputs/scaled_depth
 python scripts/export_p_exo_from_depth.py --image inputs/exo.jpg --depth outputs/scaled_depth/depth_scaled.npy --K outputs/K_exo.npy --out outputs/pose_depth
+python scripts/export_hamer_joints_exo.py --image inputs/exo.jpg --hamer_dir outputs/hamer --scaled_depth outputs/scaled_depth/depth_scaled.npy --out outputs/hamer_pose_exo
 ```
+
+`outputs/pose_depth/P_exo.npy` is a MediaPipe 2D landmark depth-lift using `outputs/scaled_depth/depth_scaled.npy` and `outputs/K_exo.npy`. It is useful as a pseudo-3D landmark diagnostic, but it is not a HaMeR/MANO joint export.
+
+For HaMeR/MANO joint coordinates in the same exocentric camera scale used by the projected mesh depth, use:
+
+```text
+outputs/hamer_pose_exo/hamer_joints_exo.npy
+```
+
+This file is exported from HaMeR `*_joints.npy` plus `pred_cam_t_full`, with the same left-hand 2D mirror correction used by mesh-depth rendering. Use this file, not `P_exo.npy`, when comparing against an ego hand pose that also uses HaMeR/MANO joint definitions.
 
 ## Expected Outputs
 
@@ -243,6 +254,14 @@ outputs/hamer/*_faces.npy
 outputs/hamer/*_mesh.obj
 outputs/hamer_projection/final_projection_report.md
 outputs/hamer_projection/final_projection_debug.png
+outputs/hamer_depth/hand_depth.npy
+outputs/scaled_depth/depth_scaled.npy
+outputs/pose_depth/P_exo.npy
+outputs/hamer_pose_exo/hamer_joints_exo.npy
+outputs/hamer_pose_exo/hamer_joints_2d.npy
+outputs/hamer_pose_exo/hamer_joints_exo_debug.png
+outputs/hamer_pose_exo/hamer_joints_exo_black.png
+outputs/hamer_pose_exo/hamer_joints_exo_metadata.json
 ```
 
 ## More Info

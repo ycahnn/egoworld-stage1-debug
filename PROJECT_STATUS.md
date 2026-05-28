@@ -26,6 +26,7 @@ Validated in this repo pass:
 - Empty point clouds and placeholder invalid crops are rejected.
 - `scripts/check_stage1_env.py` was added for HaMeR import/path/model preflight checks.
 - `scripts/verify_stage1_outputs.py` was added for generated output validation.
+- `scripts/export_hamer_joints_exo.py` was added to export HaMeR/MANO joints in the exocentric camera frame using the same mesh projection scale as `outputs/hamer_depth/hand_depth.npy`.
 - `scripts/check_project_state.py` was updated for the current conda workflow.
 
 Still environment-dependent and should be run on the target machine:
@@ -59,6 +60,11 @@ external/hamer/_DATA/data/mano_mean_params.npz
 ```
 
 `MANO_RIGHT.pkl` and `MANO_LEFT.pkl` cannot be auto-downloaded because of MANO license restrictions. The user must manually download them from MANO and place them at the paths above.
+
+## Pose Output Notes
+
+- `outputs/pose_depth/P_exo.npy` is a MediaPipe 2D landmark depth-lift from `outputs/scaled_depth/depth_scaled.npy`; it is not a HaMeR joint export.
+- `outputs/hamer_pose_exo/hamer_joints_exo.npy` is the preferred exocentric HaMeR/MANO joint file for ego/exo pose alignment when the ego side uses matching HaMeR/MANO joints.
 
 ## Known Constraints
 

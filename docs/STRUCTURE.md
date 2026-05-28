@@ -70,6 +70,7 @@ scripts/
   render_hand_depth.py
   scale_depth_with_hand.py
   export_p_exo_from_depth.py
+  export_hamer_joints_exo.py
   render_p_exo_skeleton_on_black.py
 ```
 
@@ -78,7 +79,8 @@ scripts/
 - `verify_hamer_projection.py`: projects HaMeR mesh outputs back onto the image.
 - `render_hand_depth.py`: rasterizes hand depth from projected HaMeR mesh.
 - `scale_depth_with_hand.py`: aligns exocentric depth scale to hand depth.
-- `export_p_exo_from_depth.py`: lifts 2D hand landmarks into exocentric 3D points.
+- `export_p_exo_from_depth.py`: lifts MediaPipe 2D hand landmarks into exocentric pseudo-3D points from scaled depth.
+- `export_hamer_joints_exo.py`: exports HaMeR/MANO joints into the exocentric camera frame using the same mesh projection scale as hand-depth rendering.
 - `render_p_exo_skeleton_on_black.py`: visualizes final `P_exo`.
 
 ## External Dependency
@@ -128,6 +130,10 @@ outputs/hand_bboxes.json
 outputs/hand_crops/
 outputs/hamer/
 outputs/hamer_projection/
+outputs/hamer_depth/
+outputs/scaled_depth/
+outputs/pose_depth/
+outputs/hamer_pose_exo/
 ```
 
 ## Files That Should Not Be Committed
