@@ -92,6 +92,13 @@ def mirror_2d_in_bbox(points_2d, bbox):
     return mirrored
 
 
+def has_native_left_mesh(entry):
+    handedness = entry.get("output_handedness") or entry.get("hamer_output", {}).get("output_handedness") or {}
+    return handedness.get("mesh_handedness") == "left" and bool(
+        handedness.get("left_hand_x_mirror_applied_to_vertices_and_joints")
+    )
+
+
 def backproject_points(points_2d, z, focal, center):
     fx, fy = focal
     cx, cy = center
@@ -219,7 +226,7 @@ def main():
         joints_cam_original = joints_local + cam_t.reshape(1, 3)
         joints_2d = project_points(joints_cam_original, focal, center)
         mirror_applied = False
-        if hand_side == "left":
+        if hand_side == "left" and not has_native_left_mesh(entry):
             joints_2d = mirror_2d_in_bbox(joints_2d, entry.get("bbox_xyxy", [0, 0, 0, 0]))
             mirror_applied = True
 
@@ -279,7 +286,7 @@ def main():
 
     metadata = {
         "coordinate_system": "exo_camera_from_hamer_mesh_projection_scale",
-        "source": "HaMeR pred_keypoints_3d translated by pred_cam_t_full; left hand follows the same 2D mirror correction used for mesh depth rendering",
+        "source": "HaMeR pred_keypoints_3d translated by pred_cam_t_full; native left-hand meshes use their saved left-handed coordinates, while legacy right-canonical left outputs keep the old 2D mirror fallback",
         "source_hamer_metadata": str((hamer_dir / "hamer_metadata.json").relative_to(project_root)),
         "scaled_depth_reference": str(scaled_depth_path.relative_to(project_root)) if scaled_depth_path.exists() else None,
         "joint_order": [f"hamer_mano_joint_{i:02d}" for i in range(21)],

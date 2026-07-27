@@ -1,5 +1,11 @@
 import argparse
 import os
+import sys
+from pathlib import Path
+
+PROJECT_ROOT = Path(__file__).resolve().parents[2]
+if str(PROJECT_ROOT) not in sys.path:
+    sys.path.insert(0, str(PROJECT_ROOT))
 
 import cv2
 
@@ -16,7 +22,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument(
         "--bbox_json",
         required=True,
-        help="Path to the hand_bboxes.json file from infer_hand_bbox.py.",
+        help="Path to the hand_bboxes.json file from scripts/stage1/infer_hand_bbox.py.",
     )
     parser.add_argument(
         "--out",

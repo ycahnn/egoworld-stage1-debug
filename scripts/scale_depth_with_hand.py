@@ -76,6 +76,7 @@ def parse_args():
     parser.add_argument("--hand_depth", required=True, help="Path to rendered hand depth npy")
     parser.add_argument("--hand_mask", required=True, help="Path to rendered hand mask PNG")
     parser.add_argument("--out", required=True, help="Output directory for scaled depth results")
+    parser.add_argument("--K", default=None, help="Optional camera intrinsics .npy for scaled point cloud export")
     parser.add_argument("--erode_kernel", type=int, default=5, help="Erosion kernel size for hand mask cleanup")
     parser.add_argument(
         "--erode_min_ratio",
@@ -268,7 +269,7 @@ def main():
 
     # Load camera intrinsics from original depth estimation if available
     K_exo = None
-    K_exo_path = project_root / "outputs" / "K_exo.npy"
+    K_exo_path = project_root / args.K if args.K is not None else project_root / "outputs" / "K_exo.npy"
     if K_exo_path.exists():
         try:
             K_exo = np.load(str(K_exo_path))

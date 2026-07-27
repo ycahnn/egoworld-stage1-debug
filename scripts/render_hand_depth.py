@@ -15,6 +15,16 @@ def parse_args():
     parser.add_argument("--hamer_dir", required=True, help="Path to HaMeR outputs directory")
     parser.add_argument("--bbox_json", required=True, help="Path to MediaPipe hand bboxes JSON")
     parser.add_argument("--out", required=True, help="Output directory for rendered depth results")
+    parser.add_argument(
+        "--reference_depth",
+        default=None,
+        help="Optional depth npy in the target point-cloud frame, e.g. MoGE depth_raw.npy.",
+    )
+    parser.add_argument(
+        "--align_depth_to_reference",
+        action="store_true",
+        help="Per-hand median-align rendered HaMeR depth to --reference_depth before saving hand_depth.npy.",
+    )
     return parser.parse_args()
 
 
@@ -84,6 +94,13 @@ def bbox_2d_mirror(projected, bbox):
     return np.stack([mirrored_u, projected[:, 1]], axis=1)
 
 
+def has_native_left_mesh(entry):
+    handedness = entry.get("output_handedness") or entry.get("hamer_output", {}).get("output_handedness") or {}
+    return handedness.get("mesh_handedness") == "left" and bool(
+        handedness.get("left_hand_x_mirror_applied_to_vertices_and_joints")
+    )
+
+
 def bbox_from_points(points):
     x = points[:, 0]
     y = points[:, 1]
@@ -132,6 +149,36 @@ def rasterize_mesh(projected, depth_values, faces, zbuffer, hand_buffer, hand_id
                 if z < zbuffer[y, x]:
                     zbuffer[y, x] = z
                     hand_buffer[y, x] = hand_id
+
+
+def compute_depth_alignment_scale(projected, depth_values, faces, reference_depth):
+    height, width = reference_depth.shape
+    zbuffer = np.full((height, width), np.inf, dtype=np.float32)
+    hand_buffer = np.full((height, width), -1, dtype=np.int32)
+    rasterize_mesh(projected, depth_values, faces, zbuffer, hand_buffer, 0)
+    valid = (
+        (hand_buffer == 0)
+        & np.isfinite(zbuffer)
+        & (zbuffer > 0)
+        & np.isfinite(reference_depth)
+        & (reference_depth > 0)
+    )
+    if not np.any(valid):
+        return 1.0, 0, None
+    ratios = reference_depth[valid].astype(np.float64) / zbuffer[valid].astype(np.float64)
+    ratios = ratios[np.isfinite(ratios) & (ratios > 0)]
+    ratios = ratios[(ratios >= 0.01) & (ratios <= 100.0)]
+    if ratios.size == 0:
+        return 1.0, 0, None
+    p05, p50, p95 = np.percentile(ratios, [5, 50, 95])
+    filtered = ratios[(ratios >= p05) & (ratios <= p95)]
+    if filtered.size == 0:
+        filtered = ratios
+    return float(np.median(filtered)), int(filtered.size), {
+        "p05": float(p05),
+        "p50": float(p50),
+        "p95": float(p95),
+    }
 
 
 def draw_wireframe(image, projected, faces, color):
@@ -198,6 +245,15 @@ def main():
     if not outputs:
         raise ValueError("No outputs found in hamer_metadata.json")
 
+    reference_depth = None
+    if args.reference_depth is not None:
+        reference_depth_path = project_root / args.reference_depth
+        reference_depth = np.load(str(reference_depth_path))
+        if reference_depth.shape != image.shape[:2]:
+            raise ValueError(f"reference_depth shape {reference_depth.shape} does not match image shape {image.shape[:2]}")
+        if not args.align_depth_to_reference:
+            print("Warning: --reference_depth was provided without --align_depth_to_reference; it will only be recorded.")
+
     image_shape = image.shape
     height, width = image_shape[0], image_shape[1]
     inf = np.inf
@@ -259,14 +315,29 @@ def main():
         projected_bbox = bbox_from_points(original_projection)
         left_mirror_applied = False
         projected_for_render = original_projection
-        if hand_label.lower() == "left":
+        if hand_label.lower() == "left" and not has_native_left_mesh(entry):
             projected_for_render = bbox_2d_mirror(original_projection, bbox_xyxy)
             left_mirror_applied = True
             left_mirror_bbox = bbox_from_points(projected_for_render)
         else:
             left_mirror_bbox = None
 
-        rasterize_mesh(projected_for_render, depth_values, faces, zbuffer, hand_buffer, hand_index)
+        depth_alignment_scale = 1.0
+        depth_alignment_count = 0
+        depth_alignment_stats = None
+        depth_values_for_render = depth_values
+        if args.align_depth_to_reference:
+            if reference_depth is None:
+                raise ValueError("--align_depth_to_reference requires --reference_depth")
+            depth_alignment_scale, depth_alignment_count, depth_alignment_stats = compute_depth_alignment_scale(
+                projected_for_render,
+                depth_values,
+                faces,
+                reference_depth,
+            )
+            depth_values_for_render = depth_values * depth_alignment_scale
+
+        rasterize_mesh(projected_for_render, depth_values_for_render, faces, zbuffer, hand_buffer, hand_index)
 
         record = {
             "hand_index": hand_index,
@@ -276,6 +347,9 @@ def main():
             "left_bbox_2d_mirror_applied": left_mirror_applied,
             "projected_bbox": projected_bbox,
             "left_bbox_2d_mirror_bbox": left_mirror_bbox,
+            "depth_alignment_scale_to_reference": depth_alignment_scale,
+            "depth_alignment_valid_pixels": depth_alignment_count,
+            "depth_alignment_ratio_stats": depth_alignment_stats,
         }
         hand_records.append(record)
 
@@ -316,6 +390,9 @@ def main():
         if record['left_bbox_2d_mirror_applied']:
             report_lines.append(f"left_bbox_2d_mirror_bbox: {record['left_bbox_2d_mirror_bbox']}")
         report_lines.append(f"valid depth pixels: {valid_counts[record['hand_index']]}" )
+        report_lines.append(f"depth_alignment_scale_to_reference: {record['depth_alignment_scale_to_reference']}")
+        report_lines.append(f"depth_alignment_valid_pixels: {record['depth_alignment_valid_pixels']}")
+        report_lines.append(f"depth_alignment_ratio_stats: {record['depth_alignment_ratio_stats']}")
         report_lines.append("")
 
     report_lines.append(f"hand_depth: {hand_depth_path}")

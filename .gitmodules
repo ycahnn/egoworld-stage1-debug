@@ -1,0 +1,6 @@
+[submodule "external/EgoWorld"]
+	path = external/EgoWorld
+	url = https://github.com/redorangeyellowy/EgoWorld.git
+[submodule "external/gaze3d"]
+	path = external/gaze3d
+	url = https://github.com/idiap/gaze3d.git

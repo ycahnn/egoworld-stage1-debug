@@ -160,6 +160,13 @@ def mirror_2d_projection(projected, bbox):
     return np.stack([mirrored_u, projected[:, 1]], axis=1)
 
 
+def has_native_left_mesh(entry):
+    handedness = entry.get("output_handedness") or entry.get("hamer_output", {}).get("output_handedness") or {}
+    return handedness.get("mesh_handedness") == "left" and bool(
+        handedness.get("left_hand_x_mirror_applied_to_vertices_and_joints")
+    )
+
+
 def bbox_from_points(points):
     x = points[:, 0]
     y = points[:, 1]
@@ -301,7 +308,7 @@ def main():
                 center,
                 img_size=img_size or [original_width, original_height],
             )
-            if hand_label.lower() == "left":
+            if hand_label.lower() == "left" and not has_native_left_mesh(entry):
                 left_bbox_2d_proj = mirror_2d_projection(original_projection, bbox_xyxy)
 
         bbox_proj = project_bbox_fallback(vertices, bbox_xyxy)

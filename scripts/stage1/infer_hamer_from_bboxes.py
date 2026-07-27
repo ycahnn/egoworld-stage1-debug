@@ -7,7 +7,7 @@ mesh per detected hand.
 
 Usage (example):
 conda activate egoworld-hamer
-python infer_hamer_from_bboxes.py \
+python scripts/stage1/infer_hamer_from_bboxes.py \
     --image inputs/exo.jpg \
     --bbox_json outputs/hand_bboxes.json \
     --out outputs/hamer
@@ -27,10 +27,12 @@ import cv2
 import numpy as np
 import torch
 
+PROJECT_ROOT = Path(__file__).resolve().parents[2]
+if str(PROJECT_ROOT) not in sys.path:
+    sys.path.insert(0, str(PROJECT_ROOT))
+
 from src.hamer_stage1_compat import cam_crop_to_full, install_hamer_renderer_stub
 
-
-PROJECT_ROOT = Path(__file__).resolve().parent
 HAMER_ROOT = PROJECT_ROOT / "external" / "hamer"
 
 # Make the local external HaMeR clone win over any installed hamer package.
@@ -233,6 +235,26 @@ def _require_finite_array(name: str, array: np.ndarray, ndim: int | None = None)
         raise ValueError(f"{name} contains NaN or inf values")
 
 
+def _mirror_x(array: np.ndarray) -> np.ndarray:
+    mirrored = array.copy()
+    mirrored[:, 0] *= -1.0
+    return mirrored
+
+
+def _reverse_face_winding(faces: np.ndarray) -> np.ndarray:
+    reversed_faces = faces.copy()
+    reversed_faces[:, [1, 2]] = reversed_faces[:, [2, 1]]
+    return reversed_faces
+
+
+def _correct_left_hand_cam(pred_cam: torch.Tensor, is_left: bool) -> torch.Tensor:
+    if not is_left:
+        return pred_cam
+    corrected = pred_cam.clone()
+    corrected[:, 1] *= -1.0
+    return corrected
+
+
 def _validate_bbox(x1: int, y1: int, x2: int, y2: int, image_width: int, image_height: int, index: int) -> None:
     if x2 <= x1 or y2 <= y1:
         raise ValueError(f"Hand bbox {index} is invalid: {[x1, y1, x2, y2]}")
@@ -366,10 +388,14 @@ def main() -> None:
 
         scaled_focal_length = None
         pred_cam_t_full = None
+        side = entries[idx].get("hand_side_for_hamer") or "unknown"
+        safe_side = (side.lower() if isinstance(side, str) else "unknown")
+        is_left_hand = safe_side == "left"
+
         if "pred_cam" in out and "box_center" in batch and "box_size" in batch and "img_size" in batch:
             try:
                 scaled_focal_length = _compute_scaled_focal_length(model_cfg, batch["img_size"].float())
-                pred_cam = out["pred_cam"]
+                pred_cam = _correct_left_hand_cam(out["pred_cam"], is_left_hand)
                 full_cam_t = cam_crop_to_full(
                     pred_cam,
                     batch["box_center"].float(),
@@ -408,21 +434,32 @@ def main() -> None:
         if not hasattr(model, "mano") or not hasattr(model.mano, "faces"):
             raise AttributeError("Loaded HaMeR model does not expose model.mano.faces")
 
-        verts = out["pred_vertices"][0].detach().cpu().numpy()
-        joints = out["pred_keypoints_3d"][0].detach().cpu().numpy()
+        verts_raw = out["pred_vertices"][0].detach().cpu().numpy()
+        joints_raw = out["pred_keypoints_3d"][0].detach().cpu().numpy()
         faces = np.asarray(model.mano.faces).copy()
-        _require_finite_array("pred_vertices", verts, ndim=2)
-        _require_finite_array("pred_keypoints_3d", joints, ndim=2)
+        _require_finite_array("pred_vertices", verts_raw, ndim=2)
+        _require_finite_array("pred_keypoints_3d", joints_raw, ndim=2)
         _require_finite_array("mano.faces", faces, ndim=2)
-        if verts.shape[1] != 3:
-            raise ValueError(f"pred_vertices has shape {verts.shape}; expected Nx3")
-        if joints.shape[1] != 3:
-            raise ValueError(f"pred_keypoints_3d has shape {joints.shape}; expected Nx3")
+        if verts_raw.shape[1] != 3:
+            raise ValueError(f"pred_vertices has shape {verts_raw.shape}; expected Nx3")
+        if joints_raw.shape[1] != 3:
+            raise ValueError(f"pred_keypoints_3d has shape {joints_raw.shape}; expected Nx3")
         if faces.shape[1] != 3:
             raise ValueError(f"mano.faces has shape {faces.shape}; expected Fx3")
 
-        side = entries[idx].get("hand_side_for_hamer") or "unknown"
-        safe_side = (side.lower() if isinstance(side, str) else "unknown")
+        if is_left_hand:
+            verts = _mirror_x(verts_raw)
+            joints = _mirror_x(joints_raw)
+            faces_to_save = _reverse_face_winding(faces)
+            mesh_handedness = "left"
+            hamer_crop_was_flipped = True
+        else:
+            verts = verts_raw
+            joints = joints_raw
+            faces_to_save = faces
+            mesh_handedness = "right" if safe_side == "right" else "unknown"
+            hamer_crop_was_flipped = False
+
         idx_str = f"{idx:02d}_{safe_side}"
 
         verts_path = out_dir / f"hand_{idx_str}_vertices.npy"
@@ -432,8 +469,18 @@ def main() -> None:
 
         np.save(verts_path, verts)
         np.save(joints_path, joints)
-        np.save(faces_path, faces)
-        save_obj(verts, faces, obj_path)
+        np.save(faces_path, faces_to_save)
+        save_obj(verts, faces_to_save, obj_path)
+
+        output_handedness = {
+            "mesh_handedness": mesh_handedness,
+            "hamer_canonical_output_handedness": "right",
+            "hamer_crop_was_flipped": hamer_crop_was_flipped,
+            "left_hand_x_mirror_applied_to_vertices_and_joints": is_left_hand,
+            "left_hand_camera_x_mirror_applied": is_left_hand,
+            "face_winding_reversed": is_left_hand,
+        }
+        hand_summary["output_handedness"] = output_handedness
 
         all_metadata["outputs"].append({
             "index": idx,
@@ -450,6 +497,7 @@ def main() -> None:
             "joints": str(joints_path),
             "faces": str(faces_path),
             "obj": str(obj_path),
+            "output_handedness": output_handedness,
             "hamer_output": hand_summary,
         })
 

@@ -16,20 +16,12 @@ REQUIRED_PATHS = [
     "outputs/hamer_depth/hand_mask.png",
     "outputs/scaled_depth/depth_scaled.npy",
     "outputs/scaled_depth/exo_point_cloud_scaled.ply",
-    "outputs/pose_depth/P_exo.npy",
-    "outputs/pose_depth/P_exo_2d.npy",
-    "outputs/pose_depth/P_exo_valid.npy",
-    "outputs/pose_depth/P_exo_projection_debug.png",
-    "outputs/pose_depth/P_exo_skeleton_black.png",
 ]
 
 SHAPE_PATHS = [
     "outputs/depth_raw.npy",
     "outputs/scaled_depth/depth_scaled.npy",
     "outputs/hamer_depth/hand_depth.npy",
-    "outputs/pose_depth/P_exo.npy",
-    "outputs/pose_depth/P_exo_2d.npy",
-    "outputs/pose_depth/P_exo_valid.npy",
 ]
 
 

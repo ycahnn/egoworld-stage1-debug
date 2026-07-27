@@ -3,6 +3,13 @@ __pycache__/
 *.py[cod]
 *.pyo
 *.pyd
+*.egg-info/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.coverage
+htmlcov/
+.ipynb_checkpoints/
 
 # Virtual environments
 .venv/
@@ -22,10 +29,25 @@ external/hamer/
 *.npy
 *.ply
 *.obj
+*.safetensors
+*.onnx
+*.engine
+*.tar
+*.tar.gz
+*.tgz
+*.zip
+*.mp4
+*.avi
+*.mov
+*.mkv
 
 # Project outputs
 outputs/
 checkpoints/
+runs/
+wandb/
+lightning_logs/
+tensorboard/
 
 # Input data
 inputs/
@@ -39,11 +61,22 @@ external/hamer/_DATA/
 Thumbs.db
 .vscode/
 .idea/
+*.swp
+*.swo
 
 # Logs
 *.log
+*.pid
+core
+core.*
 _trash_review/
 
-data/
-checkpoints/
+# Local configuration and credentials
+.env
+.env.*
+!.env.example
+*cookies*.txt
 
+# Dataset and experiment artifacts
+data/
+logs/
